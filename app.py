@@ -1,6 +1,7 @@
 import os
 import logging
 import numpy as np
+import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from tensorflow.keras.models import load_model
@@ -17,13 +18,80 @@ CORS(app)  # Enable CORS for React Native frontend
 # Global variables for lazy loading
 model = None
 MODEL_PATH = "models/eye_disease_model.h5"
+# Google Drive direct download URL (converted from your shared link)
+MODEL_URL = "https://drive.google.com/uc?export=download&id=1xUTbvzCI13cKQu0FEddv-AYtn_vOwgdg"
 CATEGORIES = ["Cataract", "Diabetic Retinopathy", "Glaucoma", "Normal"]
+
+def download_model_from_drive():
+    """Download model from Google Drive if not exists locally"""
+    if os.path.exists(MODEL_PATH):
+        logging.info(f"Model already exists at {MODEL_PATH}")
+        return True
+    
+    try:
+        logging.info("Model not found locally. Downloading from Google Drive...")
+        os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
+        
+        # Use session to handle Google Drive's virus scan warning
+        session = requests.Session()
+        
+        # First request to get the file
+        response = session.get(MODEL_URL, stream=True)
+        
+        # Handle Google Drive's virus scan warning for large files
+        if 'virus scan warning' in response.text.lower():
+            # Look for the download confirmation link
+            for line in response.text.split('\n'):
+                if 'export=download&amp;confirm=' in line:
+                    # Extract the confirm token
+                    import re
+                    confirm_token = re.search(r'confirm=([^&"]*)', line)
+                    if confirm_token:
+                        confirm_url = f"{MODEL_URL}&confirm={confirm_token.group(1)}"
+                        response = session.get(confirm_url, stream=True)
+                        break
+        
+        # Check if we got a valid response
+        if response.status_code == 200:
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
+            
+            with open(MODEL_PATH, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        
+                        # Log progress for large files
+                        if total_size > 0:
+                            progress = (downloaded_size / total_size) * 100
+                            if downloaded_size % (1024 * 1024 * 10) == 0:  # Log every 10MB
+                                logging.info(f"Download progress: {progress:.1f}%")
+            
+            file_size = os.path.getsize(MODEL_PATH)
+            logging.info(f"Model downloaded successfully! File size: {file_size / (1024*1024):.1f} MB")
+            return True
+            
+        else:
+            logging.error(f"Failed to download model. Status code: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        logging.error(f"Error downloading model: {e}")
+        if os.path.exists(MODEL_PATH):
+            os.remove(MODEL_PATH)  # Remove incomplete file
+        return False
 
 def load_model_lazy():
     """Lazy load the model when first needed"""
     global model
     if model is None:
         try:
+            # Try to download model if not exists
+            if not os.path.exists(MODEL_PATH):
+                if not download_model_from_drive():
+                    raise Exception("Failed to download model from Google Drive")
+            
             logging.info(f"Loading model from {MODEL_PATH}...")
             model = load_model(MODEL_PATH)
             logging.info("Model loaded successfully!")
@@ -48,21 +116,30 @@ def home():
 @app.route("/status", methods=["GET"])
 def status():
     model_status = "Not Loaded"
+    model_source = "Local"
+    
     try:
         if model is not None:
             model_status = "Loaded"
+            model_source = "Local (Downloaded from Google Drive)" if not os.path.exists(MODEL_PATH) else "Local"
         elif os.path.exists(MODEL_PATH):
             model_status = "Available (Not Loaded)"
+            file_size = os.path.getsize(MODEL_PATH)
+            model_source = f"Local ({file_size / (1024*1024):.1f} MB)"
         else:
-            model_status = "Model File Missing"
+            model_status = "Will Download from Google Drive"
+            model_source = "Google Drive (Auto-download)"
     except:
         model_status = "Error"
+        model_source = "Unknown"
     
     return jsonify({
         "service": "Eye Disease Detection API",
         "status": "Active",
         "model_status": model_status,
+        "model_source": model_source,
         "model_loaded": model is not None,
+        "model_url": MODEL_URL,
         "supported_conditions": CATEGORIES,
         "endpoints": {
             "/": "GET - API info",

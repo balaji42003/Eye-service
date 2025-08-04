@@ -25,9 +25,11 @@ Your repository is now configured for Render deployment with the following featu
 
 ### 🔧 **How to Deploy on Render**
 
-1. **Upload Your Model**:
-   - Place your `eye_disease_model.h5` file in the `models/` directory
-   - The model should be approximately 113MB
+1. **Automatic Model Download**:
+   - The model will be automatically downloaded from Google Drive on first prediction request
+   - Model URL: `https://drive.google.com/file/d/1xUTbvzCI13cKQu0FEddv-AYtn_vOwgdg/view`
+   - File size: ~113MB
+   - Download location: `models/eye_disease_model.h5`
 
 2. **Deploy to Render**:
    - Go to [render.com](https://render.com)

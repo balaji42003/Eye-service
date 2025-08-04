@@ -10,7 +10,7 @@ backlog = 2048
 workers = 1  # Single worker to avoid memory issues with large ML models
 worker_class = "sync"
 worker_connections = 1000
-timeout = 120  # Increased timeout for model loading and predictions
+timeout = 300  # Increased timeout for model downloading and predictions (5 minutes)
 keepalive = 2
 
 # Restart workers after this many requests, to help prevent memory leaks
