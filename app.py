@@ -8,6 +8,7 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.preprocessing import image
 from PIL import Image
 import io
+from datetime import datetime
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -50,7 +51,7 @@ def download_model_from_drive():
         download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
         
         logging.info("Attempting to download model...")
-        response = session.get(download_url, stream=True)
+        response = session.get(download_url, stream=True, timeout=300)  # 5 minute timeout
         
         # Check if we got the virus scan warning page
         if response.status_code == 200 and 'text/html' in response.headers.get('content-type', ''):
@@ -66,7 +67,7 @@ def download_model_from_drive():
                 confirm_token = match.group(1)
                 download_url_with_confirm = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={confirm_token}"
                 logging.info(f"Found confirm token, downloading with confirmation...")
-                response = session.get(download_url_with_confirm, stream=True)
+                response = session.get(download_url_with_confirm, stream=True, timeout=300)
         
         # Check if we have a valid binary response
         if response.status_code == 200:
@@ -88,8 +89,8 @@ def download_model_from_drive():
                         f.write(chunk)
                         downloaded_size += len(chunk)
                         
-                        # Log progress every 10MB
-                        if downloaded_size % (10 * 1024 * 1024) == 0:
+                        # Log progress every 20MB
+                        if downloaded_size % (20 * 1024 * 1024) == 0:
                             if total_size > 0:
                                 progress = (downloaded_size / total_size) * 100
                                 logging.info(f"Download progress: {progress:.1f}% ({downloaded_size / (1024*1024):.1f} MB)")
@@ -109,7 +110,6 @@ def download_model_from_drive():
             
         else:
             logging.error(f"Failed to download model. Status code: {response.status_code}")
-            logging.error(f"Response content: {response.text[:500]}")
             return False
             
     except Exception as e:
@@ -179,7 +179,7 @@ def health():
     return jsonify({
         "status": "healthy",
         "service": "Eye Disease Detection API",
-        "timestamp": logging.Formatter().formatTime(logging.LogRecord("", 0, "", 0, "", (), None))
+        "timestamp": datetime.now().isoformat()
     })
 
 @app.route("/model-status", methods=["GET"])
@@ -206,24 +206,7 @@ def model_status():
         })
     
     return jsonify(status_info)
-    model_status = "Not Loaded"
-    model_source = "Local"
-    
-    try:
-        if model is not None:
-            model_status = "Loaded"
-            model_source = "Local (Downloaded from Google Drive)" if not os.path.exists(MODEL_PATH) else "Local"
-        elif os.path.exists(MODEL_PATH):
-            model_status = "Available (Not Loaded)"
-            file_size = os.path.getsize(MODEL_PATH)
-            model_source = f"Local ({file_size / (1024*1024):.1f} MB)"
-        else:
-            model_status = "Will Download from Google Drive"
-            model_source = "Google Drive (Auto-download)"
-    except:
-        model_status = "Error"
-        model_source = "Unknown"
-    
+
 @app.route("/status", methods=["GET"])
 def status():
     model_status = "Not Loaded"
