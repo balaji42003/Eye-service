@@ -9,6 +9,7 @@ from tensorflow.keras.preprocessing import image
 from PIL import Image
 import io
 from datetime import datetime
+import gdown
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -19,12 +20,12 @@ CORS(app)  # Enable CORS for React Native frontend
 # Global variables for lazy loading
 model = None
 MODEL_PATH = "models/eye_disease_model.h5"
-# Google Drive direct download URL (converted from your shared link)
-MODEL_URL = "https://drive.google.com/uc?export=download&id=1xUTbvzCI13cKQu0FEddv-AYtn_vOwgdg"
+# Google Drive file ID from your shared link
+FILE_ID = "1xUTbvzCI13cKQu0FEddv-AYtn_vOwgdg"
 CATEGORIES = ["Cataract", "Diabetic Retinopathy", "Glaucoma", "Normal"]
 
 def download_model_from_drive():
-    """Download model from Google Drive if not exists locally"""
+    """Download model from Google Drive using gdown"""
     if os.path.exists(MODEL_PATH):
         file_size = os.path.getsize(MODEL_PATH)
         if file_size > 100 * 1024 * 1024:  # Check if file is larger than 100MB
@@ -35,69 +36,19 @@ def download_model_from_drive():
             os.remove(MODEL_PATH)
     
     try:
-        logging.info("Model not found locally. Downloading from Google Drive...")
+        logging.info("Model not found locally. Downloading from Google Drive using gdown...")
         os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
         
-        # Use session with headers to mimic browser request
-        session = requests.Session()
-        session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        })
+        # Use gdown to download the file with virus scan bypass
+        url = f"https://drive.google.com/uc?id={FILE_ID}"
         
-        # First, get the file ID from the URL
-        file_id = "1xUTbvzCI13cKQu0FEddv-AYtn_vOwgdg"
+        logging.info(f"Downloading model from: {url}")
         
-        # Try direct download first
-        download_url = f"https://drive.google.com/uc?export=download&id={file_id}"
+        # Download with gdown (handles large files and virus scan warnings automatically)
+        gdown.download(url, MODEL_PATH, quiet=False, fuzzy=True)
         
-        logging.info("Attempting to download model...")
-        response = session.get(download_url, stream=True, timeout=300)  # 5 minute timeout
-        
-        # Check if we got the virus scan warning page
-        if response.status_code == 200 and 'text/html' in response.headers.get('content-type', ''):
-            # This is likely the virus scan warning page
-            logging.info("Got virus scan warning, looking for download confirmation...")
-            
-            # Look for the confirm token in the response
-            import re
-            confirm_pattern = r'confirm=([^&"]*)'
-            match = re.search(confirm_pattern, response.text)
-            
-            if match:
-                confirm_token = match.group(1)
-                download_url_with_confirm = f"https://drive.google.com/uc?export=download&id={file_id}&confirm={confirm_token}"
-                logging.info(f"Found confirm token, downloading with confirmation...")
-                response = session.get(download_url_with_confirm, stream=True, timeout=300)
-        
-        # Check if we have a valid binary response
-        if response.status_code == 200:
-            content_type = response.headers.get('content-type', '')
-            
-            # Make sure we're not getting an HTML error page
-            if 'text/html' in content_type:
-                logging.error("Received HTML response instead of binary file. Check the Google Drive link permissions.")
-                return False
-            
-            total_size = int(response.headers.get('content-length', 0))
-            downloaded_size = 0
-            
-            logging.info(f"Starting download... Expected size: {total_size / (1024*1024):.1f} MB")
-            
-            with open(MODEL_PATH, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded_size += len(chunk)
-                        
-                        # Log progress every 20MB
-                        if downloaded_size % (20 * 1024 * 1024) == 0:
-                            if total_size > 0:
-                                progress = (downloaded_size / total_size) * 100
-                                logging.info(f"Download progress: {progress:.1f}% ({downloaded_size / (1024*1024):.1f} MB)")
-                            else:
-                                logging.info(f"Downloaded: {downloaded_size / (1024*1024):.1f} MB")
-            
-            # Verify the downloaded file
+        # Verify the downloaded file
+        if os.path.exists(MODEL_PATH):
             actual_size = os.path.getsize(MODEL_PATH)
             if actual_size > 100 * 1024 * 1024:  # Should be around 113MB
                 logging.info(f"Model downloaded successfully! File size: {actual_size / (1024*1024):.1f} MB")
@@ -107,16 +58,39 @@ def download_model_from_drive():
                 if os.path.exists(MODEL_PATH):
                     os.remove(MODEL_PATH)
                 return False
-            
         else:
-            logging.error(f"Failed to download model. Status code: {response.status_code}")
+            logging.error("Model file was not created after download attempt")
             return False
             
     except Exception as e:
-        logging.error(f"Error downloading model: {e}")
-        if os.path.exists(MODEL_PATH):
-            os.remove(MODEL_PATH)  # Remove incomplete file
-        return False
+        logging.error(f"Error downloading model with gdown: {e}")
+        
+        # Fallback: Try alternative gdown method
+        try:
+            logging.info("Trying alternative gdown download method...")
+            
+            # Alternative method with file ID directly
+            gdown.download(id=FILE_ID, output=MODEL_PATH, quiet=False)
+            
+            if os.path.exists(MODEL_PATH):
+                actual_size = os.path.getsize(MODEL_PATH)
+                if actual_size > 100 * 1024 * 1024:
+                    logging.info(f"Model downloaded successfully with alternative method! File size: {actual_size / (1024*1024):.1f} MB")
+                    return True
+                else:
+                    logging.error(f"Alternative download also resulted in small file: {actual_size} bytes")
+                    if os.path.exists(MODEL_PATH):
+                        os.remove(MODEL_PATH)
+                    return False
+            else:
+                logging.error("Alternative download method also failed")
+                return False
+                
+        except Exception as fallback_error:
+            logging.error(f"Both gdown methods failed: {fallback_error}")
+            if os.path.exists(MODEL_PATH):
+                os.remove(MODEL_PATH)
+            return False
 
 def load_model_lazy():
     """Lazy load the model when first needed"""
@@ -188,7 +162,7 @@ def model_status():
     status_info = {
         "model_loaded": model is not None,
         "model_path": MODEL_PATH,
-        "model_url": MODEL_URL
+        "file_id": FILE_ID
     }
     
     if os.path.exists(MODEL_PATH):
@@ -226,7 +200,7 @@ def status():
                 model_source = "Google Drive (Auto-download)"
         else:
             model_status = "Will Download from Google Drive"
-            model_source = "Google Drive (Auto-download)"
+            model_source = "Google Drive (Auto-download with gdown)"
     except:
         model_status = "Error"
         model_source = "Unknown"
@@ -237,7 +211,7 @@ def status():
         "model_status": model_status,
         "model_source": model_source,
         "model_loaded": model is not None,
-        "model_url": MODEL_URL,
+        "file_id": FILE_ID,
         "supported_conditions": CATEGORIES,
         "endpoints": {
             "/": "GET - API info",
