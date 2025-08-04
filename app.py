@@ -20,12 +20,13 @@ CORS(app)  # Enable CORS for React Native frontend
 # Global variables for lazy loading
 model = None
 MODEL_PATH = "models/eye_disease_model.h5"
-# Google Drive file ID from your shared link
+# Direct download URL - this should bypass the HTML warning page
+DIRECT_DOWNLOAD_URL = "https://drive.google.com/uc?export=download&id=1xUTbvzCI13cKQu0FEddv-AYtn_vOwgdg"
 FILE_ID = "1xUTbvzCI13cKQu0FEddv-AYtn_vOwgdg"
 CATEGORIES = ["Cataract", "Diabetic Retinopathy", "Glaucoma", "Normal"]
 
 def download_model_from_drive():
-    """Download model from Google Drive using gdown"""
+    """Download model from Google Drive using direct download URL"""
     if os.path.exists(MODEL_PATH):
         file_size = os.path.getsize(MODEL_PATH)
         if file_size > 100 * 1024 * 1024:  # Check if file is larger than 100MB
@@ -36,61 +37,95 @@ def download_model_from_drive():
             os.remove(MODEL_PATH)
     
     try:
-        logging.info("Model not found locally. Downloading from Google Drive using gdown...")
+        logging.info("Model not found locally. Downloading from Google Drive...")
         os.makedirs(os.path.dirname(MODEL_PATH), exist_ok=True)
         
-        # Use gdown to download the file with virus scan bypass
-        url = f"https://drive.google.com/uc?id={FILE_ID}"
-        
-        logging.info(f"Downloading model from: {url}")
-        
-        # Download with gdown (handles large files and virus scan warnings automatically)
-        gdown.download(url, MODEL_PATH, quiet=False, fuzzy=True)
-        
-        # Verify the downloaded file
-        if os.path.exists(MODEL_PATH):
-            actual_size = os.path.getsize(MODEL_PATH)
-            if actual_size > 100 * 1024 * 1024:  # Should be around 113MB
-                logging.info(f"Model downloaded successfully! File size: {actual_size / (1024*1024):.1f} MB")
-                return True
-            else:
-                logging.error(f"Downloaded file is too small: {actual_size} bytes. Download may have failed.")
-                if os.path.exists(MODEL_PATH):
-                    os.remove(MODEL_PATH)
-                return False
-        else:
-            logging.error("Model file was not created after download attempt")
-            return False
-            
-    except Exception as e:
-        logging.error(f"Error downloading model with gdown: {e}")
-        
-        # Fallback: Try alternative gdown method
+        # Method 1: Use the direct download URL with requests
         try:
-            logging.info("Trying alternative gdown download method...")
+            logging.info(f"Downloading model from direct URL: {DIRECT_DOWNLOAD_URL}")
             
-            # Alternative method with file ID directly
-            gdown.download(id=FILE_ID, output=MODEL_PATH, quiet=False)
+            # Use requests with proper headers and streaming
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
             
+            response = requests.get(DIRECT_DOWNLOAD_URL, headers=headers, stream=True, timeout=600)
+            response.raise_for_status()
+            
+            # Check content type to ensure we're getting binary data
+            content_type = response.headers.get('content-type', '').lower()
+            logging.info(f"Content-Type: {content_type}")
+            
+            # Download with progress tracking
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
+            
+            logging.info(f"Starting download... Expected size: {total_size / (1024*1024):.1f} MB")
+            
+            with open(MODEL_PATH, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        
+                        # Log progress every 20MB
+                        if downloaded_size % (20 * 1024 * 1024) == 0:
+                            if total_size > 0:
+                                progress = (downloaded_size / total_size) * 100
+                                logging.info(f"Download progress: {progress:.1f}% ({downloaded_size / (1024*1024):.1f} MB)")
+                            else:
+                                logging.info(f"Downloaded: {downloaded_size / (1024*1024):.1f} MB")
+            
+            # Verify the downloaded file
             if os.path.exists(MODEL_PATH):
                 actual_size = os.path.getsize(MODEL_PATH)
-                if actual_size > 100 * 1024 * 1024:
-                    logging.info(f"Model downloaded successfully with alternative method! File size: {actual_size / (1024*1024):.1f} MB")
+                if actual_size > 100 * 1024 * 1024:  # Should be around 113MB
+                    logging.info(f"Model downloaded successfully! File size: {actual_size / (1024*1024):.1f} MB")
                     return True
                 else:
-                    logging.error(f"Alternative download also resulted in small file: {actual_size} bytes")
+                    logging.error(f"Downloaded file is too small: {actual_size} bytes. Download may have failed.")
                     if os.path.exists(MODEL_PATH):
                         os.remove(MODEL_PATH)
                     return False
             else:
-                logging.error("Alternative download method also failed")
+                logging.error("Model file was not created after download attempt")
+                return False
+                
+        except Exception as e:
+            logging.warning(f"Direct URL download failed: {e}")
+            if os.path.exists(MODEL_PATH):
+                os.remove(MODEL_PATH)
+        
+        # Method 2: Fallback to gdown as backup
+        try:
+            logging.info("Trying fallback with gdown...")
+            success = gdown.download(DIRECT_DOWNLOAD_URL, MODEL_PATH, quiet=False, fuzzy=True)
+            
+            if success and os.path.exists(MODEL_PATH):
+                actual_size = os.path.getsize(MODEL_PATH)
+                if actual_size > 100 * 1024 * 1024:
+                    logging.info(f"Fallback gdown successful! File size: {actual_size / (1024*1024):.1f} MB")
+                    return True
+                else:
+                    logging.error(f"Fallback gdown resulted in small file: {actual_size} bytes")
+                    if os.path.exists(MODEL_PATH):
+                        os.remove(MODEL_PATH)
+                    return False
+            else:
+                logging.error("Fallback gdown method also failed")
                 return False
                 
         except Exception as fallback_error:
-            logging.error(f"Both gdown methods failed: {fallback_error}")
+            logging.error(f"Fallback gdown method failed: {fallback_error}")
             if os.path.exists(MODEL_PATH):
                 os.remove(MODEL_PATH)
             return False
+            
+    except Exception as e:
+        logging.error(f"Error downloading model: {e}")
+        if os.path.exists(MODEL_PATH):
+            os.remove(MODEL_PATH)
+        return False
 
 def load_model_lazy():
     """Lazy load the model when first needed"""
@@ -162,7 +197,8 @@ def model_status():
     status_info = {
         "model_loaded": model is not None,
         "model_path": MODEL_PATH,
-        "file_id": FILE_ID
+        "file_id": FILE_ID,
+        "download_url": DIRECT_DOWNLOAD_URL
     }
     
     if os.path.exists(MODEL_PATH):
@@ -197,10 +233,10 @@ def status():
                 model_source = f"Local ({file_size / (1024*1024):.1f} MB)"
             else:
                 model_status = "File Corrupted - Will Re-download"
-                model_source = "Google Drive (Auto-download)"
+                model_source = "Google Drive (Direct Download)"
         else:
             model_status = "Will Download from Google Drive"
-            model_source = "Google Drive (Auto-download with gdown)"
+            model_source = "Google Drive (Direct Download URL)"
     except:
         model_status = "Error"
         model_source = "Unknown"
@@ -212,6 +248,7 @@ def status():
         "model_source": model_source,
         "model_loaded": model is not None,
         "file_id": FILE_ID,
+        "download_url": DIRECT_DOWNLOAD_URL,
         "supported_conditions": CATEGORIES,
         "endpoints": {
             "/": "GET - API info",
